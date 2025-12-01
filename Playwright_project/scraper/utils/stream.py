@@ -28,42 +28,48 @@ async def streaming_scroll_and_collect_stepwise(
     stagnant, last_total = 0, 0
     counter = 0
 
-    # Start at top & avoid smooth scrolling (reduces reflow races)
+    # Start at top & disable smooth scroll to reduce long reflow windows
     await page.evaluate("() => { window.scrollTo(0, 0); }")
-    try:
-        await page.add_style_tag(content="html { scroll-behavior: auto !important; }")
-    except Exception:
-        pass
 
+    # Compute scroll step from viewport height
     viewport_h = await page.evaluate("() => window.innerHeight || 900")
     step_px = max(200, int(viewport_h * step_ratio))
 
     for _ in range(max_rounds):
         try:
-            # Use a Locator — it re-resolves on every action (resilient to DOM changes)
+            # 1) Round-scoped live locator for ALL cards that match selector
             loc = page.locator(item_selector)
             count = await loc.count()
         except TargetClosedError:
             break
 
         counter += count
-        print(counter)  # your debug counter
+        print(counter)  # your running debug counter for how many nodes we touched
 
+        # Iterate over each card via a child locator that stays live
         for i in range(count):
-            node_loc = loc.nth(i)
+            node_loc = loc.nth(i)  # 2) Per-card live locator
 
-            # Try to bring it into view; ignore if it detaches meanwhile.
+            # 2a) Wait up to 800ms for any real media INSIDE the card to be attached.
+            #     This mitigates 'NOIMAGE' / missing src/srcset due to lazy mount.
+            try:
+                media_loc = node_loc.locator("img, picture source, video, [style*='background-image']")
+                await media_loc.first.wait_for(state="attached", timeout=800)
+            except Exception:
+                pass  # if nothing appears, we still try to parse (may be a skeleton/ad)
+
+            # 2b) Bring the card into view so lazy-load can populate attributes
             try:
                 await node_loc.scroll_into_view_if_needed(timeout=1000)
             except PWError:
-                continue
+                continue  # card remounted; skip this index
             except Exception:
                 pass
 
-            # Tiny settle time for lazy-load
+            # Small settle time for lazy-loaded attributes (src/srcset/currentSrc)
             await page.wait_for_timeout(100)
 
-            # Convert to ElementHandle as late as possible
+            # 2c) Convert to ElementHandle as late as possible (minimize detachment window)
             try:
                 node_handle = await node_loc.element_handle()
                 if node_handle is None:
@@ -73,7 +79,7 @@ async def streaming_scroll_and_collect_stepwise(
             except Exception:
                 continue
 
-            # Build item (adapter parses selectors off the handle)
+            # 3) Let the adapter parse this card into an item (Pin)
             try:
                 item = await build_item(node_handle, page)
             except TargetClosedError:
@@ -84,16 +90,17 @@ async def streaming_scroll_and_collect_stepwise(
             if item is None:
                 continue
 
+            # 4) Dedupe and collect
             key = make_key(item)
             if not key or key in seen:
                 continue
-
             seen.add(key)
             out.append(item)
+
             if len(out) >= max_items:
                 return out
 
-        # Growth check
+        # 5) Growth check: stop after several rounds with no new items
         if len(seen) <= last_total:
             stagnant += 1
         else:
@@ -103,7 +110,7 @@ async def streaming_scroll_and_collect_stepwise(
         if stagnant >= stagnant_tolerance:
             break
 
-        # Small downward step and human-like wait
+        # 6) Small scroll step + human-like wait before next round
         await page.evaluate("(y) => window.scrollBy(0, y)", step_px)
         delay = wait_min_ms + random.randint(0, wait_jitter_ms)
         await page.wait_for_timeout(delay)
