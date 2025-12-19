@@ -7,9 +7,10 @@ class Pin:                                         # Represents one scraped medi
     board_url: str                                # The URL where the crawl began (context)
     page_url: Optional[str]                       # Link to the pin's detail page (may be None)
     image_url: str                                # Direct image URL (required for downloading)
-    thumb_url: Optional[str]                      # Smaller version of the image (if available)
     title: Optional[str]                          # Title or caption (optional)
-    alt_text: Optional[str]                       # ALT text from <img> (optional)
+    alt_text: Optional[str]  
+    media_type: str = "image"       # 'image', 'video' vb. olabilir
+    video_url: Optional[str] = None # Eğer video ise doğrudan linki                     # ALT text from <img> (optional)
 
 class SiteAdapter:                                # Abstract base class for all site-specific adapters
     name: str = "base"                            # Human-readable adapter name (override per site)

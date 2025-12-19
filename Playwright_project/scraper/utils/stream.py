@@ -48,6 +48,7 @@ async def streaming_scroll_and_collect_stepwise(
 
         # Iterate over each card via a child locator that stays live
         for i in range(count):
+            print(i + counter)
             node_loc = loc.nth(i)  # 2) Per-card live locator
 
             # 2a) Wait up to 800ms for any real media INSIDE the card to be attached.
