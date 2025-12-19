@@ -40,7 +40,7 @@ class PinterestAdapter(SiteAdapter):
         # Gelen veri: "url1 1x, url2 2x, url3 3x, url4 4x"
         # Mantık: Virgülle ayır -> En sonuncuyu al -> URL kısmını çek.
         try:
-            print("SRCSET:",str(srcset))
+            #print("SRCSET:",str(srcset))
             if not srcset:
                 return None
             
@@ -63,82 +63,72 @@ class PinterestAdapter(SiteAdapter):
             return url
         return self._PINIMG_SIZE_DIR_RE.sub("/originals/", url)
 
+    # scraper/adapters/pinterest.py içindeki ilgili fonksiyonlar
+
     async def _build_pin(self, node, page) -> Optional[Pin]:
         # 1) Detay linkini al
-        a = await node.query_selector(self.LINK)
+        a = await node.query_selector("a")
         href = await a.get_attribute("href") if a else None
-        page_url = f"https://www.pinterest.com{href}" if (href and href.startswith("/")) else href
+        
+        page_url = None
+        if href:
+            page_url = f"https://www.pinterest.com{href}" if href.startswith("/") else href
 
-        # --- VİDEO KONTROLÜ ---
+        # --- VİDEO VE MEDYA TİPİ KONTROLÜ ---
         media_type = "image"
         video_url = None
         
-        # Grid kartının içinde <video> etiketi var mı?
+        # Grid içindeki video elementini ara
         video_el = await node.query_selector(self.VIDEO)
         if video_el:
-            print("VIDEO",str(video_url))
             media_type = "video"
-            src_v = await video_el.get_attribute("src")
-            # src bazen "blob:..." olabilir, bu durumda indirmek zordur ama 
-            # en azından bunun bir video olduğunu biliyoruz.
-            if src_v:
-                video_url = src_v
+            # Video kaynağını al (genellikle 'src' özniteliğindedir)
+            video_url = await video_el.get_attribute("src")
 
-        # 2) Görseli (veya video kapağını) al
-        # Video olsa bile Pinterest bir <img> (poster) gösterir, onu almalıyız.
+        # --- GÖRSEL ÇEKME (Video olsa bile poster/kapak resmi için img gereklidir) ---
         img = await node.query_selector(self.IMG)
         
-        # Eğer ne video ne resim bulabildiysek bu pini atla
+        # Eğer ne resim ne video bulunamadıysa atla
         if not img and not video_url:
             return None
 
-        # -- Resim URL Çıkarma (Mevcut mantık) --
         image_url = None
         thumb_url = None
-        alt = None
+        alt = "Pinterest Media"
 
         if img:
             srcset = await img.get_attribute("srcset") or await img.get_attribute("data-srcset")
-            src = await img.get_attribute("src")    or await img.get_attribute("data-src")
-            alt = await img.get_attribute("alt")
+            src = await img.get_attribute("src") or await img.get_attribute("data-src")
+            alt = await img.get_attribute("alt") or alt
 
-            # srcset içinden en büyüğünü seç
-            image_url = self._largest_from_srcset(srcset) if srcset else None
-            print("LARGE:",str(image_url))
-            
-            # Bulamazsa src'ye dön
-            if not image_url:
-                image_url = src
-                print("SOURCE:",str(image_url))
-
-            # Kalite yükseltmeyi dene (236x -> originals)
+            # En yüksek kalite resmi al
+            image_url = self._largest_from_srcset(srcset) if srcset else src
             image_url = self._try_upscale_pinimg(image_url)
-            print("NEW UPGRADED URL:",str(image_url))
-            print()
-            # Thumbnail olarak src'yi sakla
-            if src and src != image_url:
-                thumb_url = src
+            thumb_url = src
         
-        # Eğer ana görsel URL'i yoksa ve video da yoksa boş dön
+        # Eğer resim URL'si bulunamadıysa ve video URL'si de yoksa geçersizdir
         if not image_url and not video_url:
             return None
 
-        board_url = await node.evaluate("() => window.location.href")
-
         return Pin(
+            id=0,
             source=self.name,
-            board_url=board_url,
-            page_url=page_url,
-            image_url=image_url,    # Videoyla bu 'poster' (kapak resmi) olur
+            board_url=page.url,
+            page_url=page_url or image_url, # Benzersiz key için
+            image_url=image_url,           # Video durumunda bu 'kapak resmi' olur
             thumb_url=thumb_url,
             title=None,
             alt_text=alt,
-            media_type=media_type,  # Yeni alan: 'video' veya 'image'
-            video_url=video_url     # Yeni alan: Varsa video linki
+            media_type=media_type,         # 'video' veya 'image'
+            video_url=video_url            # Varsa video linki, yoksa None
         )
 
     def _make_key(self, pin: Pin) -> Optional[str]:
-        return pin.page_url or pin.image_url
+        # Bu fonksiyonun sonucunu stream.py içinde kontrol ediyoruz.
+        key = pin.page_url or pin.image_url
+        #if not key:
+            #print("[!] Warning: Could not generate a unique key for this Pin.")
+        return key
 
     async def stream_scroll_and_collect(self, page, max_items: int = 1000) -> List[Pin]:
         # Mevcut çağrınız aynı kalıyor
@@ -150,7 +140,7 @@ class PinterestAdapter(SiteAdapter):
             max_items=max_items,
             step_ratio=0.6,
             stagnant_tolerance=8,
-            wait_min_ms=700,
+            wait_min_ms=1000,
             wait_jitter_ms=800,
-            max_rounds=5
+            max_rounds=50
         )

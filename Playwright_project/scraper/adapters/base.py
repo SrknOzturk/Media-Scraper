@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any, List      # type hints for optional fiel
 
 @dataclass
 class Pin:                                         # Represents one scraped media item (unified schema)
+    id: int
     source: str                                   # Name of the website (e.g., "pinterest", "instagram")
     board_url: str                                # The URL where the crawl began (context)
     page_url: Optional[str]                       # Link to the pin's detail page (may be None)
@@ -11,6 +12,7 @@ class Pin:                                         # Represents one scraped medi
     alt_text: Optional[str]  
     media_type: str = "image"       # 'image', 'video' vb. olabilir
     video_url: Optional[str] = None # Eğer video ise doğrudan linki                     # ALT text from <img> (optional)
+    thumb_url: Optional[str] = None
 
 class SiteAdapter:                                # Abstract base class for all site-specific adapters
     name: str = "base"                            # Human-readable adapter name (override per site)
